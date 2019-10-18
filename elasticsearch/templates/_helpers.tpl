@@ -2,7 +2,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "name" -}}
+{{- define "elasticsearch.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
@@ -10,62 +10,99 @@ Expand the name of the chart.
 Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 */}}
-{{- define "fullname" -}}
+{{- define "elasticsearch.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
 {{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
 {{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
-
-{{- define "uname" -}}
-{{ .Values.clusterName }}-{{ .Values.nodeGroup }}
-{{- end -}}
-
-{{- define "masterService" -}}
-{{- if empty .Values.masterService -}}
-{{ .Values.clusterName }}-master
-{{- else -}}
-{{ .Values.masterService }}
-{{- end -}}
-{{- end -}}
-
-{{- define "endpoints" -}}
-{{- $replicas := .Values.replicas | int }}
-{{- $uname := printf "%s-%s" .Values.clusterName .Values.nodeGroup }}
-  {{- range $i, $e := untilStep 0 $replicas 1 -}}
-{{ $uname }}-{{ $i }},
-  {{- end -}}
-{{- end -}}
-
-{{- define "esMajorVersion" -}}
-{{- if .Values.esMajorVersion -}}
-{{ .Values.esMajorVersion }}
-{{- else -}}
-{{- $version := int (index (.Values.imageTag | splitList ".") 0) -}}
-  {{- if and (contains "docker.elastic.co/elasticsearch/elasticsearch" .Values.image) (not (eq $version 0)) -}}
-{{ $version }}
-  {{- else -}}
-7
-  {{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Return the appropriate apiVersion for statefulset.
+Create a default fully qualified client name.
+We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 */}}
-{{- define "elasticsearch.statefulset.apiVersion" -}}
-{{- if semverCompare "<1.9-0" .Capabilities.KubeVersion.GitVersion -}}
-{{- print "apps/v1beta2" -}}
+{{- define "elasticsearch.client.fullname" -}}
+{{ template "elasticsearch.fullname" . }}-{{ .Values.client.name }}
+{{- end -}}
+
+{{/*
+Create a default fully qualified data name.
+We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
+*/}}
+{{- define "elasticsearch.data.fullname" -}}
+{{ template "elasticsearch.fullname" . }}-{{ .Values.data.name }}
+{{- end -}}
+
+{{/*
+Create a default fully qualified master name.
+We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
+*/}}
+{{- define "elasticsearch.master.fullname" -}}
+{{ template "elasticsearch.fullname" . }}-{{ .Values.master.name }}
+{{- end -}}
+
+{{/*
+Create the name of the service account to use for the client component
+*/}}
+{{- define "elasticsearch.serviceAccountName.client" -}}
+{{- if .Values.serviceAccounts.client.create -}}
+    {{ default (include "elasticsearch.client.fullname" .) .Values.serviceAccounts.client.name }}
 {{- else -}}
-{{- print "apps/v1" -}}
+    {{ default "default" .Values.serviceAccounts.client.name }}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Return the appropriate apiVersion for ingress.
+Create the name of the service account to use for the data component
 */}}
-{{- define "elasticsearch.ingress.apiVersion" -}}
-{{- if semverCompare "<1.14-0" .Capabilities.KubeVersion.GitVersion -}}
-{{- print "extensions/v1beta1" -}}
+{{- define "elasticsearch.serviceAccountName.data" -}}
+{{- if .Values.serviceAccounts.data.create -}}
+    {{ default (include "elasticsearch.data.fullname" .) .Values.serviceAccounts.data.name }}
 {{- else -}}
-{{- print "networking.k8s.io/v1beta1" -}}
+    {{ default "default" .Values.serviceAccounts.data.name }}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Create the name of the service account to use for the master component
+*/}}
+{{- define "elasticsearch.serviceAccountName.master" -}}
+{{- if .Values.serviceAccounts.master.create -}}
+    {{ default (include "elasticsearch.master.fullname" .) .Values.serviceAccounts.master.name }}
+{{- else -}}
+    {{ default "default" .Values.serviceAccounts.master.name }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+plugin installer template
+*/}}
+{{- define "plugin-installer" -}}
+- name: es-plugin-install
+  image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+  imagePullPolicy: {{ .Values.image.pullPolicy }}
+  securityContext:
+    capabilities:
+      add:
+        - IPC_LOCK
+        - SYS_RESOURCE
+  command:
+    - "sh"
+    - "-c"
+    - |
+      {{- range .Values.cluster.plugins }}
+      /usr/share/elasticsearch/bin/elasticsearch-plugin install -b {{ . }}
+      {{- end }}
+  volumeMounts:
+  - mountPath: /usr/share/elasticsearch/plugins/
+    name: plugindir
+  - mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+    name: config
+    subPath: elasticsearch.yml
 {{- end -}}
